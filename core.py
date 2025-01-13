@@ -132,9 +132,13 @@ class PolledDay(BaseModel):
     date: date
     time_slots: List[PolledTimeSlot]
     status: Optional[Status] = None
+    poll_url: Optional[HttpUrl] = None
+    signal_group_link: Optional[HttpUrl] = None
+    google_maps_link: Optional[HttpUrl] = None
 
     class Config:
         arbitrary_types_allowed = True
+        extra = "allow"
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -309,7 +313,7 @@ class FramadatePoll(BaseModel):
         self._days = []
         for date_, time_slots in days.items():
             self._days.append(
-                PolledDay(title=self.title, date=date_, time_slots=time_slots)
+                PolledDay(date=date_, time_slots=time_slots, **self.model_dump())
             )
 
         def status_decision(target: Union[PolledTimeSlot, PolledDay], nominator: float, denominator: float):

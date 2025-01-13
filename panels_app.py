@@ -29,7 +29,7 @@ class Entry(BaseModel):
     """Display text of the poll link"""
     description: Optional[str] = None
     """Description of the activity"""
-    #todo: way / address description
+    # todo: way / address description
     status: Status
     """Staffing and completion status indicator """
     sub_tasks: Optional[List[Task]] = None
@@ -39,7 +39,7 @@ class Entry(BaseModel):
     """Display text of the signal group link"""
     google_maps_link: Optional[str] = None
     """Coordinates of the location of the activity, to be used to create a google 
-    maps link.""" # todo: create google maps link (or map provider agnostic link)
+    maps link."""  # todo: create google maps link (or map provider agnostic link)
     google_maps_link_text: Optional[str] = "Zur Karte"
     """Display text of the google maps link"""
     header_tag: Optional[Styling] = Styling.h4
@@ -55,6 +55,7 @@ class Entry(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+        extra = "allow"
 
     def __init__(self, *args, **kwargs):
         if len(args) == 1 and isinstance(args[0], FramadatePoll):
@@ -78,16 +79,18 @@ class Entry(BaseModel):
                 f'<a href="{self.google_maps_link}" target="{self.link_target.value}">'
                 f'{self.signal_group_link_text}</a>'
             )
+        # print("link_list:", link_list)
         self._links = " | ".join(link_list)
+        # print("self._links:", self._links)
         self._html = f"""<div class="vertical-timeline-item vertical-timeline-element">
                     <div>
                         <span class="vertical-timeline-element-icon bounce-in">
                             <i class="{self.status.value}"> </i>
                         </span>
                         <div class="vertical-timeline-element-content bounce-in">
-                            {self.header_tag.value.opener}{self.title}{self.header_tag.value.closer}
-                            {self.body_tag.value.opener}{self.description}{self.body_tag.value.closer}
-                            {self.body_tag.value.opener}{self._links}{self.body_tag.value.closer}
+                            {self.header_tag.value.opener} {self.title} {self.header_tag.value.closer}
+                            {self.body_tag.value.opener} {self.description} {self.body_tag.value.closer}
+                            {self.body_tag.value.opener} {self._links} {self.body_tag.value.closer}
                             <span class="vertical-timeline-element-date">{self.date.strftime("%d.%m.%y")}</span>
                         </div>
                     </div>
@@ -115,35 +118,6 @@ class Entries(BaseModel):
     def html(self):
         self._gen_html()
         return self._html
-
-
-polls =  [
-    FramadatePoll(poll_uri="JLKKK3hXJ8w3GExz", title="Infostand",
-                  poll_type=PollType.booth),
-    FramadatePoll(poll_uri="xhLaKnOUkjw7CsXW", title="Plakatieren",
-                  poll_type=PollType.poster)
-]
-
-
-# await async_fetch_polls
-poll_data = fetch_polls_data(polls)
-for poll, datum in zip(polls, poll_data):
-    poll.set_poll_data(datum)
-days: List[PolledDay] = []
-for poll in polls:
-    days.extend(poll.days)
-today = datetime.now().date()
-# past_days = [day for day in days if day.date < today]
-future_days = [day for day in days if day.date >= today]
-future_days_sorted = sorted(future_days, key=lambda x: x.date)
-# entries_ = Entries(
-#     items=[Entry(**day.model_dump()) for day in future_days_sorted]
-# )
-gen_entries = [Entry(**day.model_dump()) for day in future_days_sorted]
-entries = [{"html": entry.html} for entry in gen_entries]
-
-DEFAULT_DATA = {"entries": entries, "card_title": "Aktuelle Aktionen"}
-
 
 
 class Timeline(AnyWidgetComponent):
@@ -330,6 +304,7 @@ async def update(event, polls: List[FramadatePoll] = polls_from_yaml):
     data = json.loads(json.dumps(timeline.data))
     # await async_fetch_polls
     poll_data = fetch_polls_data(polls)
+    # print("poll_data:", poll_data)
     for poll, datum in zip(polls, poll_data):
         poll.set_poll_data(datum)
     days: List[PolledDay] = []
