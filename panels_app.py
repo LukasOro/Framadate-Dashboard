@@ -1,41 +1,136 @@
 import yaml
-from enum import Enum, StrEnum
-from pydantic import BaseModel, constr
-
 import param
 import panel
-
 from panel.custom import ReactiveHTML
+from pydantic import BaseModel, HttpUrl,PrivateAttr
+from typing import List, Optional
+from datetime import datetime
+from pydantic.types import date
+from core import (
+    FramadatePoll, LinkTarget, PolledDay, Status, Styling, Task,
+    fetch_polls_data,
+)
 
-panel.extension()
+
+class Entry(BaseModel):
+    """Class to represent a single day of an activity in the timeline"""
+
+    title: str
+    """Title of the activity entry"""
+    date: date
+    """Date of the activity entry"""
+    poll_url: Optional[HttpUrl] = None
+    """URL of the poll"""
+    poll_link_text: str = "Zur Umfrage"
+    """Display text of the poll link"""
+    description: Optional[str] = None
+    """Description of the activity"""
+    #todo: way / address description
+    status: Status
+    """Staffing and completion status indicator """
+    sub_tasks: Optional[List[Task]] = None
+    signal_group_link: Optional[HttpUrl] = None
+    """Link to the signal group of the activity"""
+    signal_group_link_text: str = "Zur Signal-Gruppe"
+    """Display text of the signal group link"""
+    google_maps_link: Optional[str] = None
+    """Coordinates of the location of the activity, to be used to create a google 
+    maps link.""" # todo: create google maps link (or map provider agnostic link)
+    google_maps_link_text: Optional[str] = "Zur Karte"
+    """Display text of the google maps link"""
+    header_tag: Optional[Styling] = Styling.h4
+    """Styling of the header, containing the title of the entry"""
+    body_tag: Optional[Styling] = Styling.p
+    """Styling of the body, containing the description of the entry, links and 
+    buttons"""
+    link_target: LinkTarget = LinkTarget.NEW
+    """Kind of action that should happen when clicking links in the entry"""
+    _links: Optional[str] = PrivateAttr(default="")
+    _html: Optional[str] = PrivateAttr(default="")
+    """HTML representation of the activity as a timeline entry"""
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    def __init__(self, *args, **kwargs):
+        if len(args) == 1 and isinstance(args[0], FramadatePoll):
+            kwargs = args[0].dict()
+        data = kwargs
+        super().__init__(**data)
+        self._gen_html()
+
+    def _gen_html(self):  # todo: move to Poll
+        link_list = [
+            f'<a href="{self.poll_url}" target="{self.link_target.value}">'
+            f'{self.poll_link_text}</a>'
+        ]
+        if self.signal_group_link:
+            link_list.append(
+                f'<a href="{self.signal_group_link}" target="{self.link_target.value}">'
+                f'{self.signal_group_link_text}</a>'
+            )
+        if self.google_maps_link:
+            link_list.append(
+                f'<a href="{self.google_maps_link}" target="{self.link_target.value}">'
+                f'{self.signal_group_link_text}</a>'
+            )
+        self._links = " | ".join(link_list)
+        self._html = f"""
+                <div class="vertical-timeline-item vertical-timeline-element">
+                    <div>
+                        <span class="vertical-timeline-element-icon bounce-in">
+                            <i class="{self.status.value}"> </i>
+                        </span>
+                        <div class="vertical-timeline-element-content bounce-in">
+                            {self.header_tag.value.opener}{self.title}{self.header_tag.value.closer}
+                            {self.body_tag.value.opener}{self.description}{self.body_tag.value.closer}
+                            {self.body_tag.value.opener}{self._links}{self.body_tag.value.closer}
+                            <span class="vertical-timeline-element-date">
+{self.date.strftime("DD.MM.YY")}</span>
+                        </div>
+                    </div>
+                </div>
+                """
+
+    @property
+    def html(self):
+        if not self._html:
+            self._gen_html()
+        return self._html
+
+
+class Entries(BaseModel):
+    items: list[Entry]
+    _html: Optional[str] = PrivateAttr("")
+
+    def _gen_html(self):
+        self._html = "\n".join([item.html for item in self.items])
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        self._gen_html()
+
+    @property
+    def html(self):
+        self._gen_html()
+        return self._html
+
 
 class TimelineLayout(ReactiveHTML):
     card_title = param.String(default="Aktuelle Aktionen")
-    entries = param.String(
-        default="""
-<div class="vertical-timeline-item vertical-timeline-element">
-    <div>
-        <span class="vertical-timeline-element-icon bounce-in">
-            <i class="badge badge-dot badge-dot-xl badge-success"></i>
-        </span>
-        <div class="vertical-timeline-element-content bounce-in">
-            <h4 class="timeline-title">Meeting with client</h4>
-            <p>Meeting with USA Client, today at <a href="javascript:void(0);" data-abc="true">12:00 PM</a></p>
-            <span class="vertical-timeline-element-date">9:30 AM</span>
-        </div>
-    </div>
-</div>
-"""
-    )
+    polls = param.List(item_type=FramadatePoll)
+    _entries = param.ClassSelector(class_=Entries)
+    _entries_html = param.String(default="")
+
     # todo: make each card collapsible
     _template = """
 <div class="row d-flex justify-content-center mt-70 mb-70">
-    <div class="col-md-6">
+    <div>
         <div class="main-card mb-3 card">
             <div class="card-body">
                 <h3 class="card-title">{{card_title}}</h3>
                 <div class="vertical-timeline vertical-timeline--animate vertical-timeline--one-column">               
-                    {{entries}}
+                    {{entries_html}}
                 </div>
             </div>
         </div>        
@@ -43,7 +138,7 @@ class TimelineLayout(ReactiveHTML):
 </div>
 """
     _stylesheets = [
-        "https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css",
+        "https://cdn.jsdelivr.net/npm/bootstrap@4/dist/css/bootstrap.min.css",
         """
 body{
      background-color: #eee;
@@ -171,99 +266,43 @@ body{
 """
     ]
 
+    def update(self):
+        # thread = run_async(async_fetch_polls_data, aiohttp.ClientSession(), self.polls)
+        # thread.join()
+        # poll_data = thread.result
+        # poll_data = asyncio.run(async_fetch_polls_data(self.polls))
+        poll_data = fetch_polls_data(self.polls)
+        for poll, data in zip(self.polls, poll_data):
+            poll.set_poll_data(data)
+        days: List[PolledDay] = []
+        for poll in self.polls:
+            days.extend(poll.days)
+        today = datetime.now().date()
+        # past_days = [day for day in days if day.date < today]
+        future_days = [day for day in days if day.date >= today]
+        future_days_sorted = sorted(future_days, key=lambda x: x.date)
+        self._entries = Entries(
+            items=[Entry(**day.model_dump()) for day in future_days_sorted]
+        )
+        self._entries_html = self._entries.html
 
-class Tag(BaseModel):
-    opener: str
-    closer: str
-
-
-class Styling(Enum):
-    h4 = Tag(opener='<h4 class="timeline-title">', closer='</h4>')
-    p = Tag(opener='<p>', closer='</p>')
-
-
-class Status(StrEnum):
-    UNDERSTAFFED = "badge badge-dot badge-dot-xl badge-danger"  # red
-    HALF_STAFFED = "badge badge-dot badge-dot-xl badge-warning"  # yellow
-    FULL_STAFFED = "badge badge-dot badge-dot-xl badge-primary"  # blue
-    DONE = "badge badge-dot badge-dot-xl badge-success"  # green
-
-
-class LinkTarget(StrEnum):
-    SAME = "_self"
-    NEW = "_blank"
-    TOP = "_top"
-    PARENT = "_parent"
-
-class Entry(BaseModel):
-    header_txt: str
-    header_tag: Styling = Styling.h4
-    body_txt: str
-    body_tag: Styling = Styling.p
-    link_txt: str = "Zur Umfrage"
-    link_url: constr(pattern=r"https?://.*")
-    link_target: LinkTarget = LinkTarget.NEW
-    date_txt: constr(pattern=r"\d{2}\.\d{2}\.(?:\d{2,4})?")
-    status: Status
-    _html: str
-
-    def __init__(self, **data):
-        super().__init__(**data)
-        self._html = f"""
-        <div class="vertical-timeline-item vertical-timeline-element">
-            <div>
-                <span class="vertical-timeline-element-icon bounce-in">
-                    <i class="{self.status.value}"></i>
-                </span>
-                <div class="vertical-timeline-element-content bounce-in">
-                    {self.header_tag.value.opener}{self.header_txt}{self.header_tag.value.closer}
-                    {self.body_tag.value.opener}{self.body_txt}{self.body_tag.value.closer}
-                    {self.body_tag.value.opener}<a href="{self.link_url}" target="{self.link_target.value}">{self.link_txt}</a>{self.body_tag.value.closer}
-                    <span class="vertical-timeline-element-date">{self.date_txt}</span>
-                </div>
-            </div>
-        </div>
-        """
-
-    def get_html(self):
-        return self._html
+    def __init__(self, **params):
+        if "polls" in params and params["polls"]:
+            self.polls = params["polls"]
+        super().__init__(**params)
+        self.update()
 
 
-class Entries(BaseModel):
-    items: list[Entry]
-    _html: str
+panel.extension()
 
-    def __init__(self, **data):
-        super().__init__(**data)
-        self._html = "\n".join([item.get_html() for item in self.items])
-
-    def get_html(self):
-        return self._html
-#
-# with open("data/polls.yaml", "r") as f:
-#     content = yaml.safe_load(f)
-#     # entries2 = Entries(items=yaml.safe_load(f))
-
-entries = Entries(items=[
-        Entry(
-            header_txt="Infostand",
-            body_txt="Wahlkampf in der Innenstadt",
-            date_txt="10.01.",
-            status=Status.DONE,
-            link_url="https://www.google.com",
-        ),
-        Entry(
-            header_txt="Plakatieren",
-            body_txt="Plakate aufhängen in der ganzen Stadt",
-            date_txt="11.01.2025",
-            status=Status.UNDERSTAFFED,
-            link_url="https://www.google.com",
-        ),
-    ]
-).get_html()
+with open("data/polls.yaml", "r") as f:
+    content = yaml.safe_load(f)
 
 app = TimelineLayout(
-    entries=entries,
+    polls=[FramadatePoll(**poll) for poll in content],
+    width=500,  # todo: necessary?
     # styles={"border": "2px solid lightgray"},
 )
+
+# todo: update button
 app.servable()
