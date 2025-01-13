@@ -1,15 +1,19 @@
+import json
+
 import yaml
 import param
 import panel
-from panel.custom import ReactiveHTML
+from panel.custom import AnyWidgetComponent
 from pydantic import BaseModel, HttpUrl,PrivateAttr
 from typing import List, Optional
 from datetime import datetime
 from pydantic.types import date
 from core import (
     FramadatePoll, LinkTarget, PolledDay, Status, Styling, Task,
-    fetch_polls_data,
+    fetch_polls_data, PollType,
 )
+
+DEFAULT_DATA = {"entries": [], "card_title": "Aktuelle Aktionen"}
 
 
 class Entry(BaseModel):
@@ -75,8 +79,7 @@ class Entry(BaseModel):
                 f'{self.signal_group_link_text}</a>'
             )
         self._links = " | ".join(link_list)
-        self._html = f"""
-                <div class="vertical-timeline-item vertical-timeline-element">
+        self._html = f"""<div class="vertical-timeline-item vertical-timeline-element">
                     <div>
                         <span class="vertical-timeline-element-icon bounce-in">
                             <i class="{self.status.value}"> </i>
@@ -85,12 +88,10 @@ class Entry(BaseModel):
                             {self.header_tag.value.opener}{self.title}{self.header_tag.value.closer}
                             {self.body_tag.value.opener}{self.description}{self.body_tag.value.closer}
                             {self.body_tag.value.opener}{self._links}{self.body_tag.value.closer}
-                            <span class="vertical-timeline-element-date">
-{self.date.strftime("DD.MM.YY")}</span>
+                            <span class="vertical-timeline-element-date">{self.date.strftime("%d.%m.%y")}</span>
                         </div>
                     </div>
-                </div>
-                """
+                </div>"""
 
     @property
     def html(self):
@@ -116,27 +117,46 @@ class Entries(BaseModel):
         return self._html
 
 
-class TimelineLayout(ReactiveHTML):
-    card_title = param.String(default="Aktuelle Aktionen")
-    polls = param.List(item_type=FramadatePoll)
-    _entries = param.ClassSelector(class_=Entries)
-    _entries_html = param.String(default="")
+polls =  [
+    FramadatePoll(poll_uri="JLKKK3hXJ8w3GExz", title="Infostand",
+                  poll_type=PollType.booth),
+    FramadatePoll(poll_uri="xhLaKnOUkjw7CsXW", title="Plakatieren",
+                  poll_type=PollType.poster)
+]
 
-    # todo: make each card collapsible
-    _template = """
-<div class="row d-flex justify-content-center mt-70 mb-70">
-    <div>
-        <div class="main-card mb-3 card">
-            <div class="card-body">
-                <h3 class="card-title">{{card_title}}</h3>
-                <div class="vertical-timeline vertical-timeline--animate vertical-timeline--one-column">               
-                    {{entries_html}}
-                </div>
-            </div>
-        </div>        
-    </div> 
-</div>
-"""
+
+# await async_fetch_polls
+poll_data = fetch_polls_data(polls)
+for poll, datum in zip(polls, poll_data):
+    poll.set_poll_data(datum)
+days: List[PolledDay] = []
+for poll in polls:
+    days.extend(poll.days)
+today = datetime.now().date()
+# past_days = [day for day in days if day.date < today]
+future_days = [day for day in days if day.date >= today]
+future_days_sorted = sorted(future_days, key=lambda x: x.date)
+# entries_ = Entries(
+#     items=[Entry(**day.model_dump()) for day in future_days_sorted]
+# )
+gen_entries = [Entry(**day.model_dump()) for day in future_days_sorted]
+entries = [{"html": entry.html} for entry in gen_entries]
+
+DEFAULT_DATA = {"entries": entries, "card_title": "Aktuelle Aktionen"}
+
+
+
+class Timeline(AnyWidgetComponent):
+    index = param.Integer(default=0)
+    data = param.Dict(
+        default=DEFAULT_DATA
+    )
+
+    _importmap = {
+        "imports": {
+            "handlebars": "https://esm.sh/handlebars@latest",
+        }
+    }
     _stylesheets = [
         "https://cdn.jsdelivr.net/npm/bootstrap@4/dist/css/bootstrap.min.css",
         """
@@ -266,31 +286,35 @@ body{
 """
     ]
 
-    def update(self):
-        # thread = run_async(async_fetch_polls_data, aiohttp.ClientSession(), self.polls)
-        # thread.join()
-        # poll_data = thread.result
-        # poll_data = asyncio.run(async_fetch_polls_data(self.polls))
-        poll_data = fetch_polls_data(self.polls)
-        for poll, data in zip(self.polls, poll_data):
-            poll.set_poll_data(data)
-        days: List[PolledDay] = []
-        for poll in self.polls:
-            days.extend(poll.days)
-        today = datetime.now().date()
-        # past_days = [day for day in days if day.date < today]
-        future_days = [day for day in days if day.date >= today]
-        future_days_sorted = sorted(future_days, key=lambda x: x.date)
-        self._entries = Entries(
-            items=[Entry(**day.model_dump()) for day in future_days_sorted]
-        )
-        self._entries_html = self._entries.html
+    _esm = """
+    import Handlebars from "handlebars"
+    const timeline_area_template = `
+<div class="row d-flex justify-content-center mt-70 mb-70">
+    <div>
+        <div class="main-card mb-3 card">
+            <div class="card-body">
+                <h3 class="card-title">{{card_title}}</h3>
+                <div class="vertical-timeline vertical-timeline--animate vertical-timeline--one-column">               
+                    {{#each entries}}
+                        {{{html}}}
+                    {{/each}}
+                </div>
+            </div>
+        </div>        
+    </div> 
+</div>
+    `
 
-    def __init__(self, **params):
-        if "polls" in params and params["polls"]:
-            self.polls = params["polls"]
-        super().__init__(**params)
-        self.update()
+    function render({ model, el }) {
+      var template = Handlebars.compile(timeline_area_template);
+      model.on('change:data', () => {
+          el.innerHTML = template(model.get("data"));
+          console.log(model.get("data"))
+      })
+      el.innerHTML = template(model.get("data"));
+    }
+    export default { render };
+    """
 
 
 panel.extension()
@@ -298,11 +322,44 @@ panel.extension()
 with open("data/polls.yaml", "r") as f:
     content = yaml.safe_load(f)
 
-app = TimelineLayout(
-    polls=[FramadatePoll(**poll) for poll in content],
-    width=500,  # todo: necessary?
-    # styles={"border": "2px solid lightgray"},
-)
+polls_from_yaml = [FramadatePoll(**poll) for poll in content]
 
-# todo: update button
-app.servable()
+
+async def update(event, polls: List[FramadatePoll] = polls_from_yaml):
+    timeline.index += 1
+    data = json.loads(json.dumps(timeline.data))
+    # await async_fetch_polls
+    poll_data = fetch_polls_data(polls)
+    for poll, datum in zip(polls, poll_data):
+        poll.set_poll_data(datum)
+    days: List[PolledDay] = []
+    for poll in polls:
+        days.extend(poll.days)
+    today = datetime.now().date()
+    # past_days = [day for day in days if day.date < today]
+    future_days = [day for day in days if day.date >= today]
+    future_days_sorted = sorted(future_days, key=lambda x: x.date)
+    # entries_ = Entries(
+    #     items=[Entry(**day.model_dump()) for day in future_days_sorted]
+    # )
+    gen_entries = [Entry(**day.model_dump()) for day in future_days_sorted]
+    entries: list = data["entries"]
+    entries.extend([{"html": entry.html} for entry in gen_entries])
+
+    data["entries"] = entries
+    timeline.data = data
+
+
+page_title = panel.pane.HTML("<h1>Grüne Würzburg-Stadt</h1>")
+refresh_button = panel.widgets.Button(name="Aktualisieren", width=100)
+refresh_button.on_click(update)
+timeline = Timeline(width=1000, data=DEFAULT_DATA)
+
+app = panel.Column(
+    # page_title,
+    refresh_button,
+    timeline,
+)
+app
+# simulating a click
+

@@ -1,7 +1,10 @@
+# import asyncio
+
 import pandas as pd
 from io import BytesIO
 
 import requests
+# import aiohttp
 from pydantic import (
     BaseModel, constr, field_validator, HttpUrl, model_validator, PrivateAttr,
 )
@@ -161,7 +164,6 @@ class Percentage(BaseModel):
 class Task(BaseModel):
     title: str
     description: str
-    description: str
     status: Percentage
 
     class Config:
@@ -205,25 +207,6 @@ class FramadatePoll(BaseModel):
     class Config:
         arbitrary_types_allowed = True
         # validate_assignment = True
-
-    # Overwrite the serialization method to include the poll_uri
-    def dict(self, **kwargs):
-        return f"FramadatePoll(poll_uri={self.poll_uri}, title={self.title}, poll_type={self.poll_type})"
-
-    def json(  # noqa: D102
-        self,
-        *,
-        include: IncEx | None = None,
-        exclude: IncEx | None = None,
-        by_alias: bool = False,
-        exclude_unset: bool = False,
-        exclude_defaults: bool = False,
-        exclude_none: bool = False,
-        encoder: Callable[[Any], Any] | None = PydanticUndefined,  # type: ignore[assignment]
-        models_as_dict: bool = PydanticUndefined,  # type: ignore[assignment]
-        **dumps_kwargs: Any,
-    ) -> str:
-        return f'{{"poll_uri": "{self.poll_uri}", "title": "{self.title}", "poll_type": "{self.poll_type}"}}'
 
     @model_validator(mode='before')
     def url_and_uri(cls, values):
@@ -387,24 +370,6 @@ class FramadatePoll(BaseModel):
                     aggregated_status_decision(self, self._days)
 
 #
-# class RunThread(threading.Thread):
-#     def __init__(self, function, *args, **kwargs):
-#         super().__init__()
-#         self.function = function
-#         self.args = args
-#         self.kwargs = kwargs
-#         self.result = None
-#
-#     def run(self):
-#         self.result = asyncio.run(self.function(*self.args, **self.kwargs))
-#
-#
-# def run_async(func, *args, **kwargs):
-#     thread = RunThread(func, *args, **kwargs)
-#     thread.start()
-#     return thread
-#
-#
 # async def async_fetch_poll_data(session: aiohttp.ClientSession, poll: FramadatePoll) -> str:
 #     """Asynchronous function to download the csv file of a poll"""
 #     csv_url = f"https://{DOMAIN}/exportcsv.php?poll={poll.poll_uri}"
@@ -418,13 +383,14 @@ class FramadatePoll(BaseModel):
 #         tasks = [async_fetch_poll_data(session, poll) for poll in polls]
 #         return await asyncio.gather(*tasks)
 
+
 def fetch_poll_data(poll: FramadatePoll) -> str:
-    """Synchronous wrapper for async_get_csv"""
+    """Synchronous version"""
     # return asyncio.run(async_fetch_poll_data(poll))
     return requests.get(f"https://{DOMAIN}/exportcsv.php?poll={poll.poll_uri}").text
 
 def fetch_polls_data(polls: List[FramadatePoll], use_async: bool = False) -> List[str]:
-    """Synchronous wrapper for async_get_csv"""
+    """Synchronous version"""
     # if use_async:
     #     return asyncio.run(async_fetch_polls_data(polls))
     # Instead use requests to download the csv file
