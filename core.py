@@ -1,20 +1,15 @@
-# import asyncio
-
 import pandas as pd
 from io import BytesIO
 
 import requests
-# import aiohttp
 from pydantic import (
     BaseModel, constr, field_validator, HttpUrl, model_validator, PrivateAttr,
 )
-from typing import List, Optional, Union, Callable, Any
+from typing import List, Optional, Union
 from enum import Enum, StrEnum
 from datetime import datetime, timedelta
 
-from pydantic.main import IncEx
 from pydantic.types import date
-from pydantic_core import PydanticUndefined
 
 DOMAIN = "nuudel.digitalcourage.de"
 DEFAULT_DURATION = 1
@@ -325,7 +320,7 @@ class FramadatePoll(BaseModel):
                         target.status = Status.UNDERSTAFFED
                     case x if x < BLUE:  # YELLOW
                         target.status = Status.HALF_STAFFED
-                    case x if x > BLUE:  # BLUE
+                    case x if x >= BLUE:  # BLUE
                         target.status = Status.FULL_STAFFED
                     case _:  # todo: revisit this
                         target.status = Status.UNDERSTAFFED
@@ -347,6 +342,11 @@ class FramadatePoll(BaseModel):
                 target.status = Status.UNDERSTAFFED
 
         # Determine status
+        print("case", self.poll_type)
+        print("total_workforce:", self.total_workforce)
+        print("minimum_staff:", self.minimum_staff)
+        print("person_hours:", self.person_hours)
+        print("person_hours_per_day:", self.person_hours_per_day)
         match self.poll_type:
             case PollType.booth:
                 for day in self._days:
@@ -355,7 +355,12 @@ class FramadatePoll(BaseModel):
                         # Estimate status per time slot
                         if self.minimum_staff is not None and self.total_workforce is not None:
                             status_decision(time_slot, time_slot.total, self.minimum_staff)
-                    aggregated_status_decision(day, self._days)
+
+                        print("timeslot:", time_slot.start_time, "status:",
+                              time_slot.status)
+                    aggregated_status_decision(day, day.time_slots)
+                    print("day:", day.date, "status:", day.status)
+
             case PollType.poster:
                 self.total_workforce = 0
                 for day in self._days:
@@ -369,7 +374,8 @@ class FramadatePoll(BaseModel):
                 # If there is no required workforce per day, estimate the status of the
                 #  whole poll, else decide based on the status of the days
                 if all(day.status is None for day in self._days):
-                    status_decision(self, self.total_workforce, self.person_hours)
+                    for day in self._days:
+                        status_decision(day, self.total_workforce, self.person_hours)
                 else:
                     aggregated_status_decision(self, self._days)
 

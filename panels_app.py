@@ -10,10 +10,17 @@ from datetime import datetime
 from pydantic.types import date
 from core import (
     FramadatePoll, LinkTarget, PolledDay, Status, Styling, Task,
-    fetch_polls_data, PollType,
+    fetch_polls_data, PollType, RED, YELLOW, BLUE
 )
 
-DEFAULT_DATA = {"entries": [], "card_title": "Aktuelle Aktionen"}
+DEFAULT_DATA = {
+    "entries": [],
+    "card_title": "Aktuelle Aktionen",
+    "legend_title": "Statuslegende",
+    "understaffed": int(YELLOW*100),
+    "half_staffed": int(BLUE*100),
+    "full_staffed": int(BLUE*100),
+}
 
 
 class Entry(BaseModel):
@@ -40,7 +47,7 @@ class Entry(BaseModel):
     google_maps_link: Optional[str] = None
     """Coordinates of the location of the activity, to be used to create a google 
     maps link."""  # todo: create google maps link (or map provider agnostic link)
-    google_maps_link_text: Optional[str] = "Zur Karte"
+    google_maps_link_text: Optional[str] = "Zum Treffpunkt"
     """Display text of the google maps link"""
     header_tag: Optional[Styling] = Styling.h4
     """Styling of the header, containing the title of the entry"""
@@ -134,22 +141,44 @@ class Timeline(AnyWidgetComponent):
     _stylesheets = [
         "https://cdn.jsdelivr.net/npm/bootstrap@4/dist/css/bootstrap.min.css",
         """
-body{
-     background-color: #eee;
+.badge-dot-xl {
+    width: 18px;
+    height: 18px;
+    position: relative;
 }
 
-.mt-70{
-     margin-top: 70px;
+.badge-dot-xl-inline {
+    display: inline-block;
+    vertical-align: middle;
 }
 
-.mb-70{
-     margin-bottom: 70px;
+.badge:empty {
+    display: none;
+}
+
+.badge-dot-xl::before {
+    content: '';
+    width: 10px;
+    height: 10px;
+    border-radius: .25rem;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    margin: -5px 0 0 -5px;
+    background: #fff;
+}
+
+body {
+    background-color: #fff; /* Set the background color to white */
+    margin: 0; /* Remove default margin */
+    padding: 0; /* Remove default padding */
 }
 
 .card {
-    box-shadow: 0 0.46875rem 2.1875rem rgba(4,9,20,0.03), 0 0.9375rem 1.40625rem rgba(4,9,20,0.03), 0 0.25rem 0.53125rem rgba(4,9,20,0.05), 0 0.125rem 0.1875rem rgba(4,9,20,0.03);
-    border-width: 0;
+    box-shadow: none; /* Remove the shadow */
+    border: none; /* Remove the border */
     transition: all .2s;
+    margin-left: 0; /* Ensure the card is aligned to the left */
 }
 
 .card {
@@ -160,14 +189,79 @@ body{
     word-wrap: break-word;
     background-color: #fff;
     background-clip: border-box;
-    border: 1px solid rgba(26,54,126,0.125);
     border-radius: .25rem;
 }
 
 .card-body {
-    flex: 1 1 auto;
-    padding: 1.25rem;
+    padding-top: 10px; /* Reduce the top padding */
+    padding-bottom: 1.25rem;
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
 }
+
+.dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+}
+
+.dot-danger {
+    background-color: #d13c47;
+}
+
+.dot-warning {
+    background-color: #ffc107;
+}
+
+.dot-primary {
+    background-color: #367df8;
+}
+
+.dot-success {
+    background-color: #45a550;
+}
+
+.legend {
+    margin-top: 20px;
+    margin-bottom: 5px; /* Reduce the bottom margin */
+}
+
+.legend ul {
+    list-style: none;
+    padding: 0;
+}
+
+.legend li {
+    display: flex;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.mt-20 {
+    margin-top: 20px;
+}
+
+.mb-10 {
+    margin-bottom: 10px;
+}
+
+.row {
+    margin-top: 20px;
+    margin-bottom: 10px;
+}
+
+.status-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.status-item p {
+    margin: 0 0 0 5px;
+}
+
 .vertical-timeline {
     width: 100%;
     position: relative;
@@ -194,6 +288,7 @@ body{
     visibility: visible;
     animation: cd-bounce-1 .8s;
 }
+
 .vertical-timeline-element-icon {
     position: absolute;
     top: 0;
@@ -202,28 +297,6 @@ body{
 
 .vertical-timeline-element-icon .badge-dot-xl {
     box-shadow: 0 0 0 5px #fff;
-}
-
-.badge-dot-xl {
-    width: 18px;
-    height: 18px;
-    position: relative;
-}
-.badge:empty {
-    display: none;
-}
-
-
-.badge-dot-xl::before {
-    content: '';
-    width: 10px;
-    height: 10px;
-    border-radius: .25rem;
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    margin: -5px 0 0 -5px;
-    background: #fff;
 }
 
 .vertical-timeline-element-content {
@@ -263,12 +336,16 @@ body{
     _esm = """
     import Handlebars from "handlebars"
     const timeline_area_template = `
-<div class="row d-flex justify-content-center mt-70 mb-70">
+<head>
+    <meta charset="UTF-8">
+</head>
+<div class="row mt-20 mb-10">
     <div>
         <div class="main-card mb-3 card">
             <div class="card-body">
-                <h3 class="card-title">{{card_title}}</h3>
-                <div class="vertical-timeline vertical-timeline--animate vertical-timeline--one-column">               
+                <h4 class="card-title">{{card_title}}</h4>
+                <div class="vertical-timeline vertical-timeline--animate 
+                vertical-timeline--one-column">               
                     {{#each entries}}
                         {{{html}}}
                     {{/each}}
@@ -293,7 +370,7 @@ body{
 
 panel.extension()
 
-with open("data/polls.yaml", "r") as f:
+with open("data/polls.yaml", "r", encoding="utf-8") as f:
     content = yaml.safe_load(f)
 
 polls_from_yaml = [FramadatePoll(**poll) for poll in content]
@@ -325,14 +402,82 @@ async def update(event, polls: List[FramadatePoll] = polls_from_yaml):
     timeline.data = data
 
 
-page_title = panel.pane.HTML("<h1>Grüne Würzburg-Stadt</h1>")
+title_and_description = panel.pane.HTML("""<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Grüne Würzburg-Stadt</title>
+    <h1>Grüne Würzburg-Stadt</h1>
+</head>
+<p>Willkommen auf der Übersichtsseite zu Gemeinschaftsaktionen der Grünen Würzburg-Stadt.</p>"""
+)
 refresh_button = panel.widgets.Button(name="Aktualisieren", width=100)
 refresh_button.on_click(update)
+legend = panel.pane.HTML(
+    """<style>
+.dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+}
+
+.dot-danger {
+    background-color: #d13c47;
+}
+
+.dot-warning {
+    background-color: #ffc107;
+}
+
+.dot-primary {
+    background-color: #367df8;
+}
+
+.dot-success {
+    background-color: #45a550;
+}
+
+.legend {
+    margin-top: 20px;
+    margin-bottom: 5px; /* Reduce the bottom margin */
+}
+
+.legend ul {
+    list-style: none;
+    padding: 0;
+}
+
+.legend li {
+    display: flex;
+    align-items: center;
+    margin-bottom: 5px;
+}
+</style>
+<head>
+    <meta charset="UTF-8">
+</head>
+<div class="legend">
+    <p>Statuslegende</p>
+    <ul>
+        <li><span class="dot dot-danger"></span>Unterbesetzt (&lt; 50 
+        %)</li>
+        <li><span class="dot dot-warning"></span>Halb besetzt (&lt; 80 
+        %)</li>
+        <li><span class="dot dot-primary"></span>Gut besetzt (&gt; 80 
+        %)</li>
+        <li><span class="dot dot-success"></span>Abgeschlossen</li>
+    </ul>
+</div>
+    """
+)
 timeline = Timeline(width=1000, data=DEFAULT_DATA)
 
 app = panel.Column(
-    # page_title,
+    title_and_description,
     refresh_button,
+    legend,
     timeline,
 )
 app

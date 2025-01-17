@@ -1,0 +1,8 @@
+pandas
+requests
+panel
+param
+aiohttp
+pydantic
+PyYAML
+nest-asyncio
